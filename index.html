@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ets. STD & Frères — Facturation</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a56a0">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="STD Facturation">
 <style>
   :root {
     --bleu: #1a56a0;
@@ -514,7 +521,9 @@
     try {
       const res = await fetch(`${BASE_URL}/${COLLECTION_FACTURES}?key=${API_KEY}&pageSize=200`);
       const data = await res.json();
-      const documents = (data.documents || []).map(depuisDocumentFirestore).reverse();
+      const documents = (data.documents || [])
+        .map(doc => ({ ...depuisDocumentFirestore(doc), _id: doc.name.split("/").pop() }))
+        .reverse();
 
       if (documents.length === 0) {
         zone.innerHTML = "<p class='vide'>Aucune facture enregistrée pour l'instant.</p>";
@@ -532,12 +541,27 @@
             <div class="num">${f.numero} ${puceStatut}</div>
             <div class="details">${f.client || "Client non renseigné"} — ${f.date} — Total : ${formatMontant(f.total)} GNF</div>
           </div>
-          <button class="btn-secondaire" onclick='rechargerFacture(${JSON.stringify(JSON.stringify(f))})'>Ouvrir</button>
+          <div style="display:flex; gap:6px;">
+            <button class="btn-secondaire" onclick='rechargerFacture(${JSON.stringify(JSON.stringify(f))})'>Ouvrir</button>
+            <button class="btn-danger" onclick="supprimerFacture('${f._id}', ${JSON.stringify(f.numero)})">Supprimer</button>
+          </div>
         `;
         zone.appendChild(div);
       });
     } catch (e) {
       zone.innerHTML = "<p class='vide'>Impossible de charger l'historique. Vérifie la connexion.</p>";
+      console.error(e);
+    }
+  }
+
+  async function supprimerFacture(id, numero) {
+    const confirmation = confirm(`Supprimer définitivement ${numero} ? Cette action est irréversible.`);
+    if (!confirmation) return;
+    try {
+      await fetch(`${BASE_URL}/${COLLECTION_FACTURES}/${id}?key=${API_KEY}`, { method: "DELETE" });
+      chargerHistorique();
+    } catch (e) {
+      alert("Erreur lors de la suppression. Vérifie la connexion.");
       console.error(e);
     }
   }
@@ -770,6 +794,15 @@
     if (reste > 0) mots += troisChiffresEnLettres(reste);
     mots = mots.trim().replace(/\s+/g, " ");
     return mots.charAt(0).toUpperCase() + mots.slice(1);
+  }
+
+  // ==========================================================
+  // ENREGISTREMENT DU SERVICE WORKER (installabilité PWA)
+  // ==========================================================
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch((e) => console.error("Service worker non enregistré", e));
+    });
   }
 </script>
 </body>
