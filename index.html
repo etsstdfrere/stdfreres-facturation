@@ -761,6 +761,10 @@
     // réservé à l'impression papier), puis on le recache juste après.
     if (entete) entete.style.display = "block";
 
+    // On laisse le navigateur peindre ce changement avant de lancer la capture,
+    // sinon html2canvas peut photographier l'état d'avant.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
     try {
       await html2pdf().set({
         margin: 8,
@@ -768,8 +772,10 @@
         image: { type: "jpeg", quality: 0.95 },
         html2canvas: {
           scale: 2,
+          useCORS: true,
           onclone: (docClone) => {
             docClone.querySelectorAll(".col-suppr, #boutonAjouterLigne").forEach(el => el.style.display = "none");
+            docClone.querySelectorAll(".entete-impression").forEach(el => el.style.display = "block");
           }
         },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
