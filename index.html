@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="STD Facturation">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
   :root {
     --bleu: #1a56a0;
@@ -245,7 +246,14 @@
           <input type="date" id="dateFacture">
         </div>
       </div>
-      <div class="ligne-champs" style="grid-template-columns: 1fr;">
+      <div class="ligne-champs">
+        <div>
+          <label>Téléphone client</label>
+          <div style="display:flex; gap:6px;">
+            <input type="tel" id="telephoneClient" placeholder="Ex : 622 07 12 58">
+            <button type="button" class="btn-whatsapp" style="padding:0 14px;" onclick="ouvrirWhatsAppClient()" title="Ouvrir la discussion WhatsApp">💬</button>
+          </div>
+        </div>
         <div>
           <label>Nom du client</label>
           <input type="text" id="nomClient" placeholder="Ex : Mamadou Diallo">
@@ -291,6 +299,7 @@
     <div class="actions-bas">
       <button class="btn-principal" onclick="enregistrerFacture()">Enregistrer</button>
       <button class="btn-secondaire" onclick="window.print()">Imprimer</button>
+      <button class="btn-secondaire" onclick="telechargerPDF()">Télécharger PDF</button>
       <button class="btn-whatsapp" onclick="partagerWhatsApp()">Partager WhatsApp</button>
       <button class="btn-secondaire" onclick="nouvelleFacture()">Nouvelle facture vierge</button>
     </div>
@@ -452,6 +461,7 @@
   // ==========================================================
   async function nouvelleFacture() {
     document.getElementById("nomClient").value = "";
+    document.getElementById("telephoneClient").value = "";
     document.getElementById("montantPaye").value = 0;
     document.getElementById("dateFacture").value = new Date().toISOString().split("T")[0];
     lignesArticles = [];
@@ -491,6 +501,7 @@
       numero: numero,
       date: document.getElementById("dateFacture").value,
       client: document.getElementById("nomClient").value,
+      telephone: document.getElementById("telephoneClient").value,
       articles: lignesArticles.map(l => ({ designation: l.designation, quantite: l.quantite, prixUnitaire: l.prixUnitaire })),
       total: total,
       paye: paye,
@@ -546,7 +557,7 @@
         div.innerHTML = `
           <div>
             <div class="num">${f.numero} ${puceStatut}</div>
-            <div class="details">${f.client || "Client non renseigné"} — ${f.date} — Total : ${formatMontant(f.total)} GNF</div>
+            <div class="details">${f.client || "Client non renseigné"}${f.telephone ? " • " + f.telephone : ""} — ${f.date} — Total : ${formatMontant(f.total)} GNF</div>
           </div>
           <div style="display:flex; gap:6px;">
             <button class="btn-secondaire" onclick='rechargerFacture(${JSON.stringify(JSON.stringify(f))})'>Ouvrir</button>
@@ -578,6 +589,7 @@
     document.getElementById("numeroFacture").value = f.numero;
     document.getElementById("dateFacture").value = f.date;
     document.getElementById("nomClient").value = f.client;
+    document.getElementById("telephoneClient").value = f.telephone || "";
     document.getElementById("montantPaye").value = f.paye;
     lignesArticles = (f.articles || []).map(a => ({ id: ++compteurLigneId, ...a }));
     redessinerTableau();
@@ -683,6 +695,7 @@
 
         <div class="actions-bas">
           <button class="btn-secondaire" onclick="window.print()">Imprimer</button>
+          <button class="btn-secondaire" onclick='telechargerBordereauPDF(${JSON.stringify(libelleMois)})'>Télécharger PDF</button>
           <button class="btn-whatsapp" onclick='partagerBordereauWhatsApp(${JSON.stringify(libelleMois)}, ${filtres.length}, ${totalCA}, ${totalEncaisse}, ${totalReste})'>Partager WhatsApp</button>
         </div>
       `;
@@ -701,9 +714,26 @@
     window.open("https://wa.me/?text=" + encodeURIComponent(texte), "_blank");
   }
 
+  // ==========================================================
+  // WHATSAPP — numéro direct du client
+  // ==========================================================
+  function normaliserNumeroWhatsApp(numero) {
+    let chiffres = (numero || "").replace(/\D/g, "");
+    if (chiffres.startsWith("224")) return chiffres;
+    if (chiffres.startsWith("0")) chiffres = chiffres.slice(1);
+    return "224" + chiffres;
+  }
+
+  function ouvrirWhatsAppClient() {
+    const numero = document.getElementById("telephoneClient").value;
+    if (!numero.trim()) { alert("Renseigne d'abord le numéro du client."); return; }
+    window.open(`https://wa.me/${normaliserNumeroWhatsApp(numero)}`, "_blank");
+  }
+
   function partagerWhatsApp() {
     const numero = document.getElementById("numeroFacture").value;
     const client = document.getElementById("nomClient").value || "Client";
+    const telephone = document.getElementById("telephoneClient").value;
     const date = document.getElementById("dateFacture").value;
     const total = lignesArticles.reduce((s, l) => s + (l.quantite * l.prixUnitaire), 0);
     const paye = Number(document.getElementById("montantPaye").value) || 0;
@@ -715,8 +745,41 @@
     });
     texte += `\nTotal : ${formatMontant(total)} GNF\nPayé : ${formatMontant(paye)} GNF\nReste à payer : ${formatMontant(Math.max(total - paye, 0))} GNF`;
 
-    window.open("https://wa.me/?text=" + encodeURIComponent(texte), "_blank");
+    const lien = telephone.trim() ? `https://wa.me/${normaliserNumeroWhatsApp(telephone)}` : "https://wa.me/";
+    window.open(lien + "?text=" + encodeURIComponent(texte), "_blank");
   }
+
+  // ==========================================================
+  // TÉLÉCHARGEMENT PDF
+  // ==========================================================
+  function telechargerPDF() {
+    const element = document.getElementById("zoneImpression");
+    const numero = document.getElementById("numeroFacture").value || "document";
+    html2pdf().set({
+      margin: 8,
+      filename: `${numero}.pdf`,
+      image: { type: "jpeg", quality: 0.95 },
+      html2canvas: {
+        scale: 2,
+        onclone: (docClone) => {
+          docClone.querySelectorAll(".col-suppr, #boutonAjouterLigne").forEach(el => el.style.display = "none");
+        }
+      },
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
+    }).from(element).save();
+  }
+
+  function telechargerBordereauPDF(libelleMois) {
+    const element = document.getElementById("zoneImpressionBordereau");
+    html2pdf().set({
+      margin: 8,
+      filename: `Bordereau-${libelleMois.replace(/\s+/g, "-")}.pdf`,
+      image: { type: "jpeg", quality: 0.95 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
+    }).from(element).save();
+  }
+
 
   // ==========================================================
   // CONVERSION FIRESTORE REST <-> OBJET JS
