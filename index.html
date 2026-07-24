@@ -752,23 +752,31 @@
   // ==========================================================
   // TÉLÉCHARGEMENT PDF
   // ==========================================================
-  function telechargerPDF() {
+  async function telechargerPDF() {
     const element = document.getElementById("zoneImpression");
+    const entete = element.querySelector(".entete-impression");
     const numero = document.getElementById("numeroFacture").value || "document";
-    html2pdf().set({
-      margin: 8,
-      filename: `${numero}.pdf`,
-      image: { type: "jpeg", quality: 0.95 },
-      html2canvas: {
-        scale: 2,
-        onclone: (docClone) => {
-          docClone.querySelectorAll(".col-suppr, #boutonAjouterLigne").forEach(el => el.style.display = "none");
-          const entete = docClone.querySelector(".entete-impression");
-          if (entete) entete.style.display = "block";
-        }
-      },
-      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
-    }).from(element).save();
+
+    // On affiche vraiment l'en-tête le temps de la capture (il est caché à l'écran normalement,
+    // réservé à l'impression papier), puis on le recache juste après.
+    if (entete) entete.style.display = "block";
+
+    try {
+      await html2pdf().set({
+        margin: 8,
+        filename: `${numero}.pdf`,
+        image: { type: "jpeg", quality: 0.95 },
+        html2canvas: {
+          scale: 2,
+          onclone: (docClone) => {
+            docClone.querySelectorAll(".col-suppr, #boutonAjouterLigne").forEach(el => el.style.display = "none");
+          }
+        },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
+      }).from(element).save();
+    } finally {
+      if (entete) entete.style.display = "none";
+    }
   }
 
   function telechargerBordereauPDF(libelleMois) {
