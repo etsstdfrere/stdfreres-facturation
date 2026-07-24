@@ -763,6 +763,8 @@
         scale: 2,
         onclone: (docClone) => {
           docClone.querySelectorAll(".col-suppr, #boutonAjouterLigne").forEach(el => el.style.display = "none");
+          const entete = docClone.querySelector(".entete-impression");
+          if (entete) entete.style.display = "block";
         }
       },
       jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
