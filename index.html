@@ -85,7 +85,7 @@
   #app { display: none; max-width: 900px; margin: 0 auto; padding: 16px; }
 
   .entete {
-    background: #fff;
+    background: linear-gradient(135deg, var(--bleu-clair) 0%, #ffffff 70%);
     border: 1px solid var(--bordure);
     border-radius: 12px;
     padding: 20px;
@@ -105,7 +105,13 @@
     padding: 6px 16px; border-radius: 20px; align-self: flex-start;
   }
   .badge-facture.paye { background: var(--vert); }
-  .entete-impression { display: none; }
+  .entete-impression {
+    display: none;
+    background: linear-gradient(135deg, var(--bleu-clair) 0%, #ffffff 70%);
+    border: 1px solid var(--bordure);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
   .badge-facture-impression {
     background: var(--bleu); color: #fff; font-size: 13px; font-weight: 700;
     padding: 6px 16px; border-radius: 20px; display: inline-block; margin-top: 4px;
@@ -172,7 +178,7 @@
     #zoneImpression, #zoneImpressionBordereau { position: absolute; top: 0; left: 0; width: 100%; padding: 20px; }
     #pinGate, .onglets, .actions-bas, .btn-danger, #boutonAjouterLigne, .col-suppr { display: none !important; }
     .entete-impression { display: block !important; }
-    .badge-facture-impression, .entete { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .badge-facture-impression, .entete, .entete-impression { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
 </head>
