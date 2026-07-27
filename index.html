@@ -833,14 +833,16 @@
 
   async function genererPdfDepuisHtml(html, nomFichier) {
     const conteneur = document.createElement("div");
-    conteneur.style.position = "fixed";
-    conteneur.style.top = "0";
-    conteneur.style.left = "-4000px";
     conteneur.style.width = "700px";
+    conteneur.style.maxWidth = "100%";
     conteneur.style.background = "#ffffff";
     conteneur.style.padding = "20px";
+    conteneur.style.margin = "0 auto";
     conteneur.innerHTML = html;
     document.body.appendChild(conteneur);
+
+    // On laisse le temps au navigateur d'afficher réellement ce contenu avant la capture
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
     try {
       await html2pdf().set({
@@ -850,6 +852,9 @@
         html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
       }).from(conteneur).save();
+    } catch (e) {
+      alert("Erreur lors de la génération du PDF : " + (e && e.message ? e.message : e));
+      console.error(e);
     } finally {
       document.body.removeChild(conteneur);
     }
