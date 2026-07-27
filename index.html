@@ -567,7 +567,7 @@
           </div>
           <div style="display:flex; gap:6px;">
             <button class="btn-secondaire" onclick='rechargerFacture(${JSON.stringify(JSON.stringify(f))})'>Ouvrir</button>
-            <button class="btn-danger" onclick="supprimerFacture('${f._id}', ${JSON.stringify(f.numero)})">Supprimer</button>
+            <button class="btn-danger" onclick='supprimerFacture("${f._id}", ${JSON.stringify(f.numero)})'>Supprimer</button>
           </div>
         `;
         zone.appendChild(div);
@@ -758,49 +758,114 @@
   // ==========================================================
   // TÉLÉCHARGEMENT PDF
   // ==========================================================
-  async function telechargerPDF() {
-    const element = document.getElementById("zoneImpression");
-    const entete = element.querySelector(".entete-impression");
-    const numero = document.getElementById("numeroFacture").value || "document";
+  function construireApercuFacturePourPDF() {
+    const numero = document.getElementById("numeroFacture").value;
+    const date = document.getElementById("dateFacture").value;
+    const client = document.getElementById("nomClient").value;
+    const telephone = document.getElementById("telephoneClient").value;
+    const total = lignesArticles.reduce((s, l) => s + (l.quantite * l.prixUnitaire), 0);
+    const paye = Number(document.getElementById("montantPaye").value) || 0;
+    const reste = Math.max(total - paye, 0);
+    const estPaye = total > 0 && reste === 0;
+    const libelle = estPaye ? "REÇU" : "FACTURE";
 
-    // On affiche vraiment l'en-tête le temps de la capture (il est caché à l'écran normalement,
-    // réservé à l'impression papier), puis on le recache juste après.
-    if (entete) entete.style.display = "block";
+    let lignesHtml = "";
+    lignesArticles.forEach((l, index) => {
+      lignesHtml += `
+        <tr>
+          <td class="col-num">${index + 1}</td>
+          <td style="padding:6px 10px; border:1px solid var(--bordure);">${l.designation || ""}</td>
+          <td style="text-align:right; padding:6px 10px; border:1px solid var(--bordure);">${l.quantite}</td>
+          <td style="text-align:right; padding:6px 10px; border:1px solid var(--bordure);">${formatMontant(l.prixUnitaire)}</td>
+          <td style="text-align:right; padding:6px 10px; border:1px solid var(--bordure); font-weight:600;">${formatMontant(l.quantite * l.prixUnitaire)}</td>
+        </tr>`;
+    });
 
-    // On laisse le navigateur peindre ce changement avant de lancer la capture,
-    // sinon html2canvas peut photographier l'état d'avant.
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return `
+      <div class="entete-impression" style="display:block;">
+        <img src="${LOGO_BASE64}" style="height:60px; display:block; margin-bottom:6px;" alt="Logo Ets. STD & Frères">
+        <h2 style="margin:0 0 4px; color:var(--bleu-fonce); font-size:18px;">Ets. STD &amp; Frères</h2>
+        <p style="font-size:12px; color:var(--texte-mute); margin:0 0 6px;">Vendeur des Accessoires des Téléphones — Électroménager &amp; Matériel Électrique</p>
+        <div style="font-size:12px; color:var(--texte-mute); line-height:1.5; margin-bottom:8px;">
+          Sis à Sonfonia T-7 vers Tombolia, Conakry — Rép. de Guinée<br>
+          Tél : +224 627 60 11 09 / 622 07 12 58 / 624 02 99 10
+        </div>
+        <div class="badge-facture-impression ${estPaye ? "paye" : ""}">${libelle}</div>
+      </div>
+
+      <div class="ligne-champs" style="margin-top:16px;">
+        <div><label>N° Facture</label><div style="padding:9px 10px; background:var(--bleu-clair); border-radius:6px; font-weight:600; color:var(--bleu-fonce);">${numero}</div></div>
+        <div><label>Date</label><div style="padding:9px 10px; border:1px solid var(--bordure); border-radius:6px;">${date}</div></div>
+      </div>
+      <div class="ligne-champs">
+        <div><label>Téléphone client</label><div style="padding:9px 10px; border:1px solid var(--bordure); border-radius:6px;">${telephone || "-"}</div></div>
+        <div><label>Nom du client</label><div style="padding:9px 10px; border:1px solid var(--bordure); border-radius:6px;">${client || "-"}</div></div>
+      </div>
+
+      <table class="tableau-articles" style="margin-top:10px;">
+        <thead>
+          <tr>
+            <th class="col-num">N°</th><th>Désignation</th><th class="col-qte">Quantité</th><th class="col-pu">P. Unitaire</th><th class="col-montant">Montant</th>
+          </tr>
+        </thead>
+        <tbody>${lignesHtml}</tbody>
+      </table>
+
+      <div class="totaux" style="margin-top:16px;">
+        <table>
+          <tr class="total-general"><td>TOTAL</td><td>${formatMontant(total)} GNF</td></tr>
+          <tr><td>Payé</td><td>${formatMontant(paye)} GNF</td></tr>
+          <tr class="reste"><td>Reste à payer</td><td>${formatMontant(reste)} GNF</td></tr>
+        </table>
+      </div>
+
+      <div class="en-lettres">Arrêtée la présente ${estPaye ? "reçu" : "facture"} à la somme de : ${nombreEnLettres(total)} francs guinéens</div>
+
+      <div class="signatures">
+        <div><div class="trait">Le Client</div></div>
+        <div style="position:relative;">
+          <img src="${CACHET_BASE64}" style="width:92px; opacity:0.92; transform:rotate(-8deg); display:block; margin:0 auto -12px;" alt="Cachet Ets. STD &amp; Frères">
+          <div class="trait">Le Gérant</div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function genererPdfDepuisHtml(html, nomFichier) {
+    const conteneur = document.createElement("div");
+    conteneur.style.position = "fixed";
+    conteneur.style.top = "0";
+    conteneur.style.left = "-4000px";
+    conteneur.style.width = "700px";
+    conteneur.style.background = "#ffffff";
+    conteneur.style.padding = "20px";
+    conteneur.innerHTML = html;
+    document.body.appendChild(conteneur);
 
     try {
       await html2pdf().set({
         margin: 8,
-        filename: `${numero}.pdf`,
+        filename: nomFichier,
         image: { type: "jpeg", quality: 0.95 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          onclone: (docClone) => {
-            docClone.querySelectorAll(".col-suppr, #boutonAjouterLigne").forEach(el => el.style.display = "none");
-            docClone.querySelectorAll(".entete-impression").forEach(el => el.style.display = "block");
-          }
-        },
+        html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
-      }).from(element).save();
+      }).from(conteneur).save();
     } finally {
-      if (entete) entete.style.display = "none";
+      document.body.removeChild(conteneur);
     }
   }
 
-  function telechargerBordereauPDF(libelleMois) {
-    const element = document.getElementById("zoneImpressionBordereau");
-    html2pdf().set({
-      margin: 8,
-      filename: `Bordereau-${libelleMois.replace(/\s+/g, "-")}.pdf`,
-      image: { type: "jpeg", quality: 0.95 },
-      html2canvas: { scale: 2 },
-      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
-    }).from(element).save();
+  async function telechargerPDF() {
+    const numero = document.getElementById("numeroFacture").value || "document";
+    await genererPdfDepuisHtml(construireApercuFacturePourPDF(), `${numero}.pdf`);
   }
+
+  async function telechargerBordereauPDF(libelleMois) {
+    const original = document.getElementById("zoneImpressionBordereau");
+    if (!original) return;
+    await genererPdfDepuisHtml(original.innerHTML, `Bordereau-${libelleMois.replace(/\s+/g, "-")}.pdf`);
+  }
+
 
 
   // ==========================================================
