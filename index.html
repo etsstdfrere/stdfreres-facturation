@@ -839,7 +839,7 @@
     conteneur.style.padding = "20px";
     conteneur.style.margin = "0 auto";
     conteneur.innerHTML = html;
-    document.body.appendChild(conteneur);
+    document.body.insertBefore(conteneur, document.body.firstChild);
 
     // On laisse le temps au navigateur d'afficher réellement ce contenu avant la capture
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
