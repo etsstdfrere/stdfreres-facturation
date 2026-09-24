@@ -1,0 +1,36 @@
+{
+  "id": "/stdfreres-facturation/",
+  "name": "Ets. STD & Frères — Facturation",
+  "short_name": "STD Facturation",
+  "description": "Facturation et bordereaux mensuels — Ets. STD & Frères, Sonfonia T-7, Conakry.",
+  "lang": "fr",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#f2f4f6",
+  "theme_color": "#1a56a0",
+  "categories": ["business", "finance", "productivity"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
