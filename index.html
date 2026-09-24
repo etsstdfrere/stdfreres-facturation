@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="STD Facturation">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
     --bleu: #1a56a0;
@@ -608,6 +608,8 @@
   // ==========================================================
   // BORDEREAU RÉCAPITULATIF MENSUEL
   // ==========================================================
+  let donneesBordereau = null;
+
   const NOMS_MOIS = ["janvier", "février", "mars", "avril", "mai", "juin",
     "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 
@@ -622,6 +624,7 @@
       const data = await res.json();
       const tous = (data.documents || []).map(depuisDocumentFirestore);
       const filtres = tous.filter(f => (f.date || "").startsWith(mois)).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+      donneesBordereau = null;
 
       const [annee, moisNum] = mois.split("-");
       const libelleMois = `${NOMS_MOIS[Number(moisNum) - 1]} ${annee}`;
@@ -634,6 +637,8 @@
       const totalCA = filtres.reduce((s, f) => s + (f.total || 0), 0);
       const totalEncaisse = filtres.reduce((s, f) => s + (f.paye || 0), 0);
       const totalReste = filtres.reduce((s, f) => s + (f.reste || 0), 0);
+
+      donneesBordereau = { libelleMois, factures: filtres, totalCA, totalEncaisse, totalReste };
 
       let lignesHtml = "";
       filtres.forEach(f => {
@@ -756,122 +761,412 @@
   }
 
   // ==========================================================
-  // TÉLÉCHARGEMENT PDF
+  // TÉLÉCHARGEMENT PDF (jsPDF — texte vectoriel, pas de capture écran)
+  // Remplace html2canvas : fiable sur téléphone, fichier léger,
+  // texte sélectionnable, jamais de page blanche.
   // ==========================================================
-  function construireApercuFacturePourPDF() {
+  const PDF_BLEU = [26, 86, 160];
+  const PDF_BLEU_FONCE = [13, 58, 114];
+  const PDF_BLEU_CLAIR = [234, 242, 251];
+  const PDF_BORDURE = [185, 211, 239];
+  const PDF_TEXTE = [27, 27, 27];
+  const PDF_MUTE = [92, 107, 120];
+  const PDF_ROUGE = [179, 65, 58];
+  const PDF_VERT = [31, 107, 71];
+  const PDF_VERT_FOND = [223, 240, 232];
+  const PDF_JAUNE_FOND = [253, 241, 214];
+  const PDF_JAUNE_TXT = [145, 106, 5];
+
+  const PDF_MARGE = 12;
+  const PDF_LARGEUR = 210;
+  const PDF_HAUTEUR = 297;
+  const PDF_UTILE = PDF_LARGEUR - 2 * PDF_MARGE;
+
+  function obtenirJsPDF() {
+    if (window.jspdf && window.jspdf.jsPDF) return window.jspdf.jsPDF;
+    if (window.jsPDF) return window.jsPDF;
+    throw new Error("La bibliothèque PDF n'est pas chargée. Vérifie ta connexion Internet puis recharge la page.");
+  }
+
+  function pdfDessinerEntete(doc, libelleBadge, badgeVert) {
+    const y = PDF_MARGE;
+    doc.setFillColor(PDF_BLEU_CLAIR[0], PDF_BLEU_CLAIR[1], PDF_BLEU_CLAIR[2]);
+    doc.setDrawColor(PDF_BORDURE[0], PDF_BORDURE[1], PDF_BORDURE[2]);
+    doc.roundedRect(PDF_MARGE, y, PDF_UTILE, 34, 3, 3, "FD");
+
+    try { doc.addImage(LOGO_BASE64, "PNG", PDF_MARGE + 4, y + 3, 18.7, 28); } catch (e) { console.warn("Logo PDF", e); }
+
+    const xt = PDF_MARGE + 26;
+    doc.setTextColor(PDF_BLEU_FONCE[0], PDF_BLEU_FONCE[1], PDF_BLEU_FONCE[2]);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.text("Ets. STD & Frères", xt, y + 10);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(PDF_MUTE[0], PDF_MUTE[1], PDF_MUTE[2]);
+    doc.text("Vendeur des Accessoires des Téléphones — Électroménager & Matériel Électrique", xt, y + 15.5);
+    doc.text("Sis à Sonfonia T-7 vers Tombolia, Conakry — Rép. de Guinée", xt, y + 20.5);
+    doc.text("Tél : +224 627 60 11 09 / 622 07 12 58 / 624 02 99 10", xt, y + 25.5);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    const lb = doc.getTextWidth(libelleBadge) + 10;
+    const xb = PDF_MARGE + PDF_UTILE - lb - 4;
+    const c = badgeVert ? PDF_VERT : PDF_BLEU;
+    doc.setFillColor(c[0], c[1], c[2]);
+    doc.roundedRect(xb, y + 26, lb, 6.5, 3.2, 3.2, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.text(libelleBadge, xb + 5, y + 30.4);
+
+    return y + 34 + 8;
+  }
+
+  function pdfPiedDePage(doc) {
+    const total = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= total; i++) {
+      doc.setPage(i);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(PDF_MUTE[0], PDF_MUTE[1], PDF_MUTE[2]);
+      doc.text("Ets. STD & Frères — Sonfonia T-7, Conakry", PDF_MARGE, PDF_HAUTEUR - 8);
+      doc.text("Page " + i + " / " + total, PDF_LARGEUR - PDF_MARGE, PDF_HAUTEUR - 8, { align: "right" });
+    }
+  }
+
+  function pdfChamp(doc, x, y, w, libelle, valeur, surligne) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(PDF_MUTE[0], PDF_MUTE[1], PDF_MUTE[2]);
+    doc.text(String(libelle).toUpperCase(), x, y);
+    doc.setDrawColor(PDF_BORDURE[0], PDF_BORDURE[1], PDF_BORDURE[2]);
+    if (surligne) {
+      doc.setFillColor(PDF_BLEU_CLAIR[0], PDF_BLEU_CLAIR[1], PDF_BLEU_CLAIR[2]);
+      doc.roundedRect(x, y + 1.5, w, 8, 1.5, 1.5, "FD");
+      doc.setTextColor(PDF_BLEU_FONCE[0], PDF_BLEU_FONCE[1], PDF_BLEU_FONCE[2]);
+    } else {
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(x, y + 1.5, w, 8, 1.5, 1.5, "FD");
+      doc.setTextColor(PDF_TEXTE[0], PDF_TEXTE[1], PDF_TEXTE[2]);
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    let txt = String(valeur === null || valeur === undefined || valeur === "" ? "-" : valeur);
+    while (doc.getTextWidth(txt) > w - 4 && txt.length > 3) txt = txt.slice(0, -2) + "…";
+    doc.text(txt, x + 2, y + 7);
+    return y + 13.5;
+  }
+
+  function construireFacturePDF() {
+    const JsPDFClasse = obtenirJsPDF();
+    const doc = new JsPDFClasse({ unit: "mm", format: "a4", orientation: "portrait", compress: true });
+
     const numero = document.getElementById("numeroFacture").value;
     const date = document.getElementById("dateFacture").value;
     const client = document.getElementById("nomClient").value;
     const telephone = document.getElementById("telephoneClient").value;
+
     const total = lignesArticles.reduce((s, l) => s + (l.quantite * l.prixUnitaire), 0);
     const paye = Number(document.getElementById("montantPaye").value) || 0;
     const reste = Math.max(total - paye, 0);
     const estPaye = total > 0 && reste === 0;
     const libelle = estPaye ? "REÇU" : "FACTURE";
 
-    let lignesHtml = "";
-    lignesArticles.forEach((l, index) => {
-      lignesHtml += `
-        <tr>
-          <td class="col-num">${index + 1}</td>
-          <td style="padding:6px 10px; border:1px solid var(--bordure);">${l.designation || ""}</td>
-          <td style="text-align:right; padding:6px 10px; border:1px solid var(--bordure);">${l.quantite}</td>
-          <td style="text-align:right; padding:6px 10px; border:1px solid var(--bordure);">${formatMontant(l.prixUnitaire)}</td>
-          <td style="text-align:right; padding:6px 10px; border:1px solid var(--bordure); font-weight:600;">${formatMontant(l.quantite * l.prixUnitaire)}</td>
-        </tr>`;
-    });
+    let y = pdfDessinerEntete(doc, libelle, estPaye);
 
-    return `
-      <div class="entete-impression" style="display:block;">
-        <img src="${LOGO_BASE64}" style="height:60px; display:block; margin-bottom:6px;" alt="Logo Ets. STD & Frères">
-        <h2 style="margin:0 0 4px; color:var(--bleu-fonce); font-size:18px;">Ets. STD &amp; Frères</h2>
-        <p style="font-size:12px; color:var(--texte-mute); margin:0 0 6px;">Vendeur des Accessoires des Téléphones — Électroménager &amp; Matériel Électrique</p>
-        <div style="font-size:12px; color:var(--texte-mute); line-height:1.5; margin-bottom:8px;">
-          Sis à Sonfonia T-7 vers Tombolia, Conakry — Rép. de Guinée<br>
-          Tél : +224 627 60 11 09 / 622 07 12 58 / 624 02 99 10
-        </div>
-        <div class="badge-facture-impression ${estPaye ? "paye" : ""}">${libelle}</div>
-      </div>
+    const demi = (PDF_UTILE - 6) / 2;
+    const y2 = pdfChamp(doc, PDF_MARGE, y, demi, "N° Facture", numero, true);
+    pdfChamp(doc, PDF_MARGE + demi + 6, y, demi, "Date", date, false);
+    y = y2;
+    y = pdfChamp(doc, PDF_MARGE, y, demi, "Téléphone client", telephone, false);
+    pdfChamp(doc, PDF_MARGE + demi + 6, y - 13.5, demi, "Nom du client", client, false);
+    y += 2;
 
-      <div class="ligne-champs" style="margin-top:16px;">
-        <div><label>N° Facture</label><div style="padding:9px 10px; background:var(--bleu-clair); border-radius:6px; font-weight:600; color:var(--bleu-fonce);">${numero}</div></div>
-        <div><label>Date</label><div style="padding:9px 10px; border:1px solid var(--bordure); border-radius:6px;">${date}</div></div>
-      </div>
-      <div class="ligne-champs">
-        <div><label>Téléphone client</label><div style="padding:9px 10px; border:1px solid var(--bordure); border-radius:6px;">${telephone || "-"}</div></div>
-        <div><label>Nom du client</label><div style="padding:9px 10px; border:1px solid var(--bordure); border-radius:6px;">${client || "-"}</div></div>
-      </div>
+    const cols = [
+      { t: "N°", w: 12, a: "center" },
+      { t: "Désignation", w: 78, a: "left" },
+      { t: "Qté", w: 20, a: "right" },
+      { t: "P. Unitaire", w: 36, a: "right" },
+      { t: "Montant", w: 40, a: "right" }
+    ];
 
-      <table class="tableau-articles" style="margin-top:10px;">
-        <thead>
-          <tr>
-            <th class="col-num">N°</th><th>Désignation</th><th class="col-qte">Quantité</th><th class="col-pu">P. Unitaire</th><th class="col-montant">Montant</th>
-          </tr>
-        </thead>
-        <tbody>${lignesHtml}</tbody>
-      </table>
+    function enteteTableau(yy) {
+      let x = PDF_MARGE;
+      doc.setFillColor(PDF_BLEU_CLAIR[0], PDF_BLEU_CLAIR[1], PDF_BLEU_CLAIR[2]);
+      doc.setDrawColor(PDF_BORDURE[0], PDF_BORDURE[1], PDF_BORDURE[2]);
+      doc.setLineWidth(0.2);
+      doc.rect(PDF_MARGE, yy, PDF_UTILE, 8, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(PDF_BLEU_FONCE[0], PDF_BLEU_FONCE[1], PDF_BLEU_FONCE[2]);
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i];
+        const tx = c.a === "right" ? x + c.w - 2 : (c.a === "center" ? x + c.w / 2 : x + 2);
+        doc.text(c.t, tx, yy + 5.4, { align: c.a });
+        if (i < cols.length - 1) doc.line(x + c.w, yy, x + c.w, yy + 8);
+        x += c.w;
+      }
+      return yy + 8;
+    }
 
-      <div class="totaux" style="margin-top:16px;">
-        <table>
-          <tr class="total-general"><td>TOTAL</td><td>${formatMontant(total)} GNF</td></tr>
-          <tr><td>Payé</td><td>${formatMontant(paye)} GNF</td></tr>
-          <tr class="reste"><td>Reste à payer</td><td>${formatMontant(reste)} GNF</td></tr>
-        </table>
-      </div>
+    y = enteteTableau(y);
 
-      <div class="en-lettres">Arrêtée la présente ${estPaye ? "reçu" : "facture"} à la somme de : ${nombreEnLettres(total)} francs guinéens</div>
+    for (let i = 0; i < lignesArticles.length; i++) {
+      const a = lignesArticles[i];
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      let lignes = doc.splitTextToSize(String(a.designation || ""), cols[1].w - 4);
+      if (!lignes.length) lignes = [""];
+      const h = Math.max(8, lignes.length * 4.4 + 3.2);
 
-      <div class="signatures">
-        <div><div class="trait">Le Client</div></div>
-        <div style="position:relative;">
-          <img src="${CACHET_BASE64}" style="width:92px; opacity:0.92; transform:rotate(-8deg); display:block; margin:0 auto -12px;" alt="Cachet Ets. STD &amp; Frères">
-          <div class="trait">Le Gérant</div>
-        </div>
-      </div>
-    `;
+      if (y + h > PDF_HAUTEUR - 40) {
+        doc.addPage();
+        y = enteteTableau(PDF_MARGE);
+      }
+
+      let x = PDF_MARGE;
+      doc.setDrawColor(PDF_BORDURE[0], PDF_BORDURE[1], PDF_BORDURE[2]);
+      doc.setFillColor(i % 2 === 0 ? 255 : 250, i % 2 === 0 ? 255 : 251, i % 2 === 0 ? 255 : 252);
+      doc.rect(PDF_MARGE, y, PDF_UTILE, h, "FD");
+      for (let k = 0; k < cols.length - 1; k++) { x += cols[k].w; doc.line(x, y, x, y + h); }
+
+      const qte = Number(a.quantite) || 0;
+      const pu = Number(a.prixUnitaire) || 0;
+      const valeurs = [String(i + 1), null, formatMontant(qte), formatMontant(pu), formatMontant(qte * pu)];
+
+      x = PDF_MARGE;
+      for (let j = 0; j < cols.length; j++) {
+        const col = cols[j];
+        doc.setTextColor(j === 0 ? PDF_MUTE[0] : PDF_TEXTE[0], j === 0 ? PDF_MUTE[1] : PDF_TEXTE[1], j === 0 ? PDF_MUTE[2] : PDF_TEXTE[2]);
+        doc.setFont("helvetica", j === 4 ? "bold" : "normal");
+        doc.setFontSize(9);
+        if (j === 1) {
+          doc.text(lignes, x + 2, y + 5.4);
+        } else {
+          const tx = col.a === "right" ? x + col.w - 2 : (col.a === "center" ? x + col.w / 2 : x + 2);
+          doc.text(valeurs[j], tx, y + 5.4, { align: col.a });
+        }
+        x += col.w;
+      }
+      y += h;
+    }
+
+    if (y + 46 > PDF_HAUTEUR - 30) { doc.addPage(); y = PDF_MARGE; }
+    y += 6;
+
+    const wT = 86;
+    const xT = PDF_MARGE + PDF_UTILE - wT;
+    doc.setDrawColor(PDF_BLEU[0], PDF_BLEU[1], PDF_BLEU[2]);
+    doc.setLineWidth(0.6);
+    doc.line(xT, y, xT + wT, y);
+    doc.setLineWidth(0.2);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(PDF_BLEU_FONCE[0], PDF_BLEU_FONCE[1], PDF_BLEU_FONCE[2]);
+    doc.text("TOTAL", xT + 2, y + 7);
+    doc.text(formatMontant(total) + " GNF", xT + wT - 2, y + 7, { align: "right" });
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor(PDF_MUTE[0], PDF_MUTE[1], PDF_MUTE[2]);
+    doc.text("Payé", xT + 2, y + 14);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(PDF_TEXTE[0], PDF_TEXTE[1], PDF_TEXTE[2]);
+    doc.text(formatMontant(paye) + " GNF", xT + wT - 2, y + 14, { align: "right" });
+
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(PDF_MUTE[0], PDF_MUTE[1], PDF_MUTE[2]);
+    doc.text("Reste à payer", xT + 2, y + 20.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(PDF_ROUGE[0], PDF_ROUGE[1], PDF_ROUGE[2]);
+    doc.text(formatMontant(reste) + " GNF", xT + wT - 2, y + 20.5, { align: "right" });
+
+    y += 28;
+
+    const phrase = "Arrêtée la présente " + (estPaye ? "reçu" : "facture") + " à la somme de : " +
+      nombreEnLettres(total) + " francs guinéens";
+    const lignesPhrase = doc.splitTextToSize(phrase, PDF_UTILE - 8);
+    const hP = lignesPhrase.length * 4.6 + 6;
+    doc.setFillColor(250, 251, 252);
+    doc.setDrawColor(PDF_BORDURE[0], PDF_BORDURE[1], PDF_BORDURE[2]);
+    doc.roundedRect(PDF_MARGE, y, PDF_UTILE, hP, 2, 2, "FD");
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.setTextColor(PDF_MUTE[0], PDF_MUTE[1], PDF_MUTE[2]);
+    doc.text(lignesPhrase, PDF_MARGE + 4, y + 5.5);
+    y += hP + 14;
+
+    if (y + 34 > PDF_HAUTEUR - 18) { doc.addPage(); y = PDF_MARGE + 10; }
+    const wS = 62;
+    const xG = PDF_MARGE + 8;
+    const xD = PDF_MARGE + PDF_UTILE - wS - 8;
+
+    try { doc.addImage(CACHET_BASE64, "PNG", xD + wS / 2 - 12, y - 2, 24, 24); } catch (e) { console.warn("Cachet PDF", e); }
+
+    doc.setDrawColor(PDF_MUTE[0], PDF_MUTE[1], PDF_MUTE[2]);
+    doc.setLineWidth(0.3);
+    doc.line(xG, y + 24, xG + wS, y + 24);
+    doc.line(xD, y + 24, xD + wS, y + 24);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(PDF_MUTE[0], PDF_MUTE[1], PDF_MUTE[2]);
+    doc.text("Le Client", xG + wS / 2, y + 29, { align: "center" });
+    doc.text("Le Gérant", xD + wS / 2, y + 29, { align: "center" });
+
+    pdfPiedDePage(doc);
+    return doc;
   }
 
-  async function genererPdfDepuisHtml(html, nomFichier) {
-    const conteneur = document.createElement("div");
-    conteneur.style.width = "700px";
-    conteneur.style.maxWidth = "100%";
-    conteneur.style.background = "#ffffff";
-    conteneur.style.padding = "20px";
-    conteneur.style.margin = "0 auto";
-    conteneur.innerHTML = html;
-    document.body.insertBefore(conteneur, document.body.firstChild);
+  function construireBordereauPDF(d) {
+    const JsPDFClasse = obtenirJsPDF();
+    const doc = new JsPDFClasse({ unit: "mm", format: "a4", orientation: "portrait", compress: true });
 
-    // On laisse le temps au navigateur d'afficher réellement ce contenu avant la capture
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const factures = d.factures || [];
+    let y = pdfDessinerEntete(doc, "BORDEREAU — " + String(d.libelleMois || "").toUpperCase(), false);
 
+    const gap = 5;
+    const wC = (PDF_UTILE - gap) / 2;
+    const hC = 18;
+
+    function carte(x, yy, titre, valeur, fond, couleurTxt) {
+      doc.setFillColor(fond[0], fond[1], fond[2]);
+      doc.roundedRect(x, yy, wC, hC, 2.5, 2.5, "F");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(couleurTxt[0], couleurTxt[1], couleurTxt[2]);
+      doc.text(titre, x + 4, yy + 6);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text(valeur, x + 4, yy + 14);
+    }
+
+    carte(PDF_MARGE, y, "Nombre de factures", String(factures.length), PDF_BLEU_CLAIR, PDF_BLEU_FONCE);
+    carte(PDF_MARGE + wC + gap, y, "Chiffre d'affaires", formatMontant(d.totalCA) + " GNF", PDF_BLEU_CLAIR, PDF_BLEU_FONCE);
+    y += hC + gap;
+    carte(PDF_MARGE, y, "Total encaissé", formatMontant(d.totalEncaisse) + " GNF", PDF_VERT_FOND, PDF_VERT);
+    carte(PDF_MARGE + wC + gap, y, "Reste à percevoir", formatMontant(d.totalReste) + " GNF", PDF_JAUNE_FOND, PDF_JAUNE_TXT);
+    y += hC + 8;
+
+    const cols = [
+      { t: "N° Facture", w: 30, a: "left" },
+      { t: "Date", w: 24, a: "left" },
+      { t: "Client", w: 44, a: "left" },
+      { t: "Total", w: 26, a: "right" },
+      { t: "Payé", w: 24, a: "right" },
+      { t: "Reste", w: 24, a: "right" },
+      { t: "Statut", w: 14, a: "center" }
+    ];
+
+    function enteteTab(yy) {
+      let x = PDF_MARGE;
+      doc.setFillColor(PDF_BLEU_CLAIR[0], PDF_BLEU_CLAIR[1], PDF_BLEU_CLAIR[2]);
+      doc.setDrawColor(PDF_BORDURE[0], PDF_BORDURE[1], PDF_BORDURE[2]);
+      doc.setLineWidth(0.2);
+      doc.rect(PDF_MARGE, yy, PDF_UTILE, 8, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(PDF_BLEU_FONCE[0], PDF_BLEU_FONCE[1], PDF_BLEU_FONCE[2]);
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i];
+        const tx = c.a === "right" ? x + c.w - 2 : (c.a === "center" ? x + c.w / 2 : x + 2);
+        doc.text(c.t, tx, yy + 5.3, { align: c.a });
+        if (i < cols.length - 1) doc.line(x + c.w, yy, x + c.w, yy + 8);
+        x += c.w;
+      }
+      return yy + 8;
+    }
+
+    y = enteteTab(y);
+
+    for (let i = 0; i < factures.length; i++) {
+      const f = factures[i];
+      if (y + 8 > PDF_HAUTEUR - 20) {
+        doc.addPage();
+        y = enteteTab(PDF_MARGE);
+      }
+      const h = 8;
+      let x = PDF_MARGE;
+      doc.setDrawColor(PDF_BORDURE[0], PDF_BORDURE[1], PDF_BORDURE[2]);
+      doc.setFillColor(i % 2 === 0 ? 255 : 250, i % 2 === 0 ? 255 : 251, i % 2 === 0 ? 255 : 252);
+      doc.rect(PDF_MARGE, y, PDF_UTILE, h, "FD");
+      for (let k = 0; k < cols.length - 1; k++) { x += cols[k].w; doc.line(x, y, x, y + h); }
+
+      const estPaye = (Number(f.reste) || 0) === 0;
+      const vals = [String(f.numero || ""), String(f.date || ""), String(f.client || "-"),
+                    formatMontant(f.total), formatMontant(f.paye), formatMontant(f.reste), null];
+
+      x = PDF_MARGE;
+      for (let j = 0; j < cols.length; j++) {
+        const c2 = cols[j];
+        if (j === 6) {
+          const cf = estPaye ? PDF_VERT_FOND : PDF_JAUNE_FOND;
+          const ct = estPaye ? PDF_VERT : PDF_JAUNE_TXT;
+          doc.setFillColor(cf[0], cf[1], cf[2]);
+          doc.roundedRect(x + 1.5, y + 2, c2.w - 3, 4.2, 2, 2, "F");
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(6.2);
+          doc.setTextColor(ct[0], ct[1], ct[2]);
+          doc.text(estPaye ? "Payé" : "Impayé", x + c2.w / 2, y + 5, { align: "center" });
+        } else {
+          doc.setTextColor(PDF_TEXTE[0], PDF_TEXTE[1], PDF_TEXTE[2]);
+          doc.setFont("helvetica", j >= 3 ? "bold" : "normal");
+          doc.setFontSize(8);
+          let txt = vals[j];
+          while (doc.getTextWidth(txt) > c2.w - 4 && txt.length > 3) txt = txt.slice(0, -2) + "…";
+          const tx = c2.a === "right" ? x + c2.w - 2 : x + 2;
+          doc.text(txt, tx, y + 5.3, { align: c2.a });
+        }
+        x += c2.w;
+      }
+      y += h;
+    }
+
+    pdfPiedDePage(doc);
+    return doc;
+  }
+
+  function enregistrerPDF(doc, nomFichier) {
+    // Sur iPhone/iPad, le téléchargement direct est bloqué : on ouvre le PDF
+    // dans un nouvel onglet pour que l'utilisateur puisse le partager/enregistrer.
+    const estIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (estIOS) {
+      const url = doc.output("bloburl");
+      window.open(url, "_blank");
+      return;
+    }
+    doc.save(nomFichier);
+  }
+
+  function telechargerPDF() {
+    if (lignesArticles.length === 0) {
+      alert("Ajoute au moins une ligne d'article avant de générer le PDF.");
+      return;
+    }
     try {
-      await html2pdf().set({
-        margin: 8,
-        filename: nomFichier,
-        image: { type: "jpeg", quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
-      }).from(conteneur).save();
+      const numero = document.getElementById("numeroFacture").value || "document";
+      const doc = construireFacturePDF();
+      enregistrerPDF(doc, numero + ".pdf");
     } catch (e) {
-      alert("Erreur lors de la génération du PDF : " + (e && e.message ? e.message : e));
       console.error(e);
-    } finally {
-      document.body.removeChild(conteneur);
+      alert("Erreur lors de la génération du PDF : " + (e && e.message ? e.message : e));
     }
   }
 
-  async function telechargerPDF() {
-    const numero = document.getElementById("numeroFacture").value || "document";
-    await genererPdfDepuisHtml(construireApercuFacturePourPDF(), `${numero}.pdf`);
+  function telechargerBordereauPDF(libelleMois) {
+    if (!donneesBordereau || !donneesBordereau.factures || donneesBordereau.factures.length === 0) {
+      alert("Génère d'abord le bordereau du mois.");
+      return;
+    }
+    try {
+      const doc = construireBordereauPDF(donneesBordereau);
+      enregistrerPDF(doc, "Bordereau-" + String(libelleMois).replace(/\s+/g, "-") + ".pdf");
+    } catch (e) {
+      console.error(e);
+      alert("Erreur lors de la génération du PDF : " + (e && e.message ? e.message : e));
+    }
   }
-
-  async function telechargerBordereauPDF(libelleMois) {
-    const original = document.getElementById("zoneImpressionBordereau");
-    if (!original) return;
-    await genererPdfDepuisHtml(original.innerHTML, `Bordereau-${libelleMois.replace(/\s+/g, "-")}.pdf`);
-  }
-
-
 
   // ==========================================================
   // CONVERSION FIRESTORE REST <-> OBJET JS
